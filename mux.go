@@ -51,6 +51,8 @@ func (mux *Mux) Serve(ctx context.Context, l net.Listener, target Target) {
 		mux.forwardTask(&wg, l, target.Rest)
 	}
 
+	go m.Serve()
+
 	<-ctx.Done()
 	log.Println("Stopping")
 	for _, l := range listeners {
@@ -95,7 +97,6 @@ func (mux *Mux) forward(wg *sync.WaitGroup, src net.Conn, remote string) error {
 		mux.Logger.Printf("forward.Dial(%s): returned err=%s\n", remote, err)
 		return err
 	}
-	mux.Logger.Printf("forward.Accept(%s): ok\n", remote)
 
 	wg.Add(2)
 	go func() {
