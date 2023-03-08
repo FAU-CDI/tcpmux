@@ -78,6 +78,7 @@ func (mux *Mux) forwardTask(wg *sync.WaitGroup, l net.Listener, remote string) {
 		for {
 			conn, err := l.Accept()
 			if err != nil {
+				mux.Logger.Printf("forward(%s): returned err=%s\n", remote, err)
 				return
 			}
 			go mux.forward(wg, conn, remote)
