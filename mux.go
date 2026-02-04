@@ -7,10 +7,11 @@ import (
 	"net"
 	"sync"
 
+	"github.com/pires/go-proxyproto"
 	"github.com/soheilhy/cmux"
 )
 
-//go:generate gogenlicense -m
+//go:generate go tool gogenlicense -m
 
 // Mux represents a multiplexer that can forward
 type Mux struct {
@@ -18,9 +19,14 @@ type Mux struct {
 }
 
 type Target struct {
-	HTTP string
-	TLS  string
-	Rest string
+	HTTP              string
+	HTTPProxyProtocol bool
+
+	TLS              string
+	TLSProxyProtocol bool
+
+	Rest              string
+	RestProxyProtocol bool
 }
 
 // Serve starts serving the provided listener until the context is closed.
@@ -34,21 +40,21 @@ func (mux *Mux) Serve(ctx context.Context, l net.Listener, target Target) {
 		l := m.Match(cmux.HTTP1(), cmux.HTTP2())
 		listeners = append(listeners, l)
 
-		mux.forwardTask(&wg, l, target.HTTP)
+		mux.forwardTask(&wg, "HTTP", l, target.HTTP, target.HTTPProxyProtocol)
 	}
 
 	if target.TLS != "" {
 		l := m.Match(cmux.TLS())
 		listeners = append(listeners, l)
 
-		mux.forwardTask(&wg, l, target.TLS)
+		mux.forwardTask(&wg, "TLS", l, target.TLS, target.TLSProxyProtocol)
 	}
 
 	if target.Rest != "" {
 		l := m.Match(cmux.Any())
 		listeners = append(listeners, l)
 
-		mux.forwardTask(&wg, l, target.Rest)
+		mux.forwardTask(&wg, "Rest", l, target.Rest, target.RestProxyProtocol)
 	}
 
 	go m.Serve()
@@ -70,12 +76,12 @@ func New(logger *log.Logger) *Mux {
 	return &Mux{Logger: logger}
 }
 
-func (mux *Mux) forwardTask(wg *sync.WaitGroup, l net.Listener, remote string) {
+func (mux *Mux) forwardTask(wg *sync.WaitGroup, name string, l net.Listener, remote string, proxyProtocol bool) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 
-		mux.Logger.Printf("forwarding to %s\n", remote)
+		mux.Logger.Printf("forwarding %s to %s (proxy protocol: %v)\n", name, remote, proxyProtocol)
 
 		for {
 			conn, err := l.Accept()
@@ -84,18 +90,28 @@ func (mux *Mux) forwardTask(wg *sync.WaitGroup, l net.Listener, remote string) {
 				return
 			}
 			wg.Add(1)
-			go mux.forward(wg, conn, remote)
+			go mux.forward(wg, conn, remote, proxyProtocol)
 		}
 	}()
 }
 
-func (mux *Mux) forward(wg *sync.WaitGroup, src net.Conn, remote string) error {
+func (mux *Mux) forward(wg *sync.WaitGroup, src net.Conn, remote string, proxyProtocol bool) error {
 	defer wg.Done()
 
 	dst, err := net.Dial("tcp", remote)
 	if err != nil {
 		mux.Logger.Printf("forward.Dial(%s): returned err=%s\n", remote, err)
 		return err
+	}
+
+	if proxyProtocol {
+		header := proxyproto.HeaderProxyFromAddrs(2, src.RemoteAddr(), src.LocalAddr())
+		if _, err := header.WriteTo(dst); err != nil {
+			mux.Logger.Printf("forward.ProxyHeader(%s): returned err=%s\n", remote, err)
+			src.Close()
+			dst.Close()
+			return err
+		}
 	}
 
 	wg.Add(2)
