@@ -1,4 +1,4 @@
-FROM alpine as permission
+FROM alpine AS permission
 
 # create www-data
 RUN set -x ; \
@@ -6,7 +6,7 @@ RUN set -x ; \
   adduser -u 82 -D -S -G www-data www-data && exit 0 ; exit 1
 
 # build the server
-FROM golang as build
+FROM golang AS build
 
 # build the app
 ADD . /app/
